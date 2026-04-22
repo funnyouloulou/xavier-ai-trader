@@ -13,7 +13,7 @@ TESTNET_URLS = {
     "fapiPrivate": "https://testnet.binancefuture.com/fapi/v1",
 }
 
-# Strategy parameters
+# Trading pairs
 DEFAULT_SYMBOL = "BTC/USDT"
 SUPPORTED_SYMBOLS = {
     "Bitcoin (BTC)": "BTC/USDT",
@@ -21,5 +21,14 @@ SUPPORTED_SYMBOLS = {
     "Solana (SOL)": "SOL/USDT",
 }
 
-BUY_DAY = 0   # Monday (weekday index: 0=Mon … 6=Sun)
-SELL_DAY = 1  # Tuesday
+# RSI + EMA strategy parameters
+RSI_PERIOD = 14
+RSI_OVERSOLD = 30       # BUY threshold
+RSI_OVERBOUGHT = 70     # SELL threshold
+EMA_SHORT = 20
+EMA_LONG = 50
+OHLCV_TIMEFRAME = "1h"
+OHLCV_LIMIT = 100
+
+# Risk management
+STOP_LOSS_PCT = 0.02    # 2% stop loss below entry price
