@@ -9,13 +9,15 @@ from config import (
     TESTNET, TESTNET_URLS,
     RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_SHORT, EMA_LONG,
-    STOP_LOSS_PCT,
+    STOP_LOSS_PCT, TAKE_PROFIT_PCT,
     OHLCV_TIMEFRAME, OHLCV_LIMIT,
 )
 
 
+# ── Exchange instances ────────────────────────────────────────────────────────
+
 def get_exchange() -> ccxt.binance:
-    """Testnet exchange for private endpoints (orders, balance)."""
+    """Testnet exchange — private endpoints only (orders, balance)."""
     config: dict = {
         "apiKey": BINANCE_API_KEY,
         "secret": BINANCE_SECRET,
@@ -33,22 +35,18 @@ def get_exchange() -> ccxt.binance:
 
 
 def _ccxt_to_yf(symbol: str) -> str:
-    # Yahoo Finance uses BTC-USD not BTC-USDT
+    """BTC/USDT → BTC-USD (Yahoo Finance format)."""
     base, quote = symbol.split("/")
     if quote == "USDT":
         quote = "USD"
     return f"{base}-{quote}"
 
 
+# ── Market data (via Yahoo Finance — no geo-restriction) ─────────────────────
+
 def get_current_price(symbol: str) -> float:
     hist = yf.Ticker(_ccxt_to_yf(symbol)).history(period="1d", interval="1m")
     return float(hist["Close"].iloc[-1])
-
-
-def get_balance(currency: str = "USDT") -> float:
-    exchange = get_exchange()
-    balance = exchange.fetch_balance()
-    return balance["free"].get(currency, 0.0)
 
 
 def _load_ohlcv(symbol: str) -> pd.DataFrame:
@@ -65,6 +63,8 @@ def _load_ohlcv(symbol: str) -> pd.DataFrame:
     return df.tail(OHLCV_LIMIT).reset_index(drop=True)
 
 
+# ── Indicators ────────────────────────────────────────────────────────────────
+
 def _compute_rsi(series: pd.Series, period: int) -> pd.Series:
     delta = series.diff()
     gain = delta.clip(lower=0).rolling(period).mean()
@@ -74,7 +74,6 @@ def _compute_rsi(series: pd.Series, period: int) -> pd.Series:
 
 
 def compute_indicators(symbol: str) -> dict:
-    """Fetch OHLCV candles and compute RSI + EMA indicators."""
     df = _load_ohlcv(symbol)
     df["ema_short"] = df["close"].ewm(span=EMA_SHORT, adjust=False).mean()
     df["ema_long"] = df["close"].ewm(span=EMA_LONG, adjust=False).mean()
@@ -89,7 +88,7 @@ def compute_indicators(symbol: str) -> dict:
     }
 
 
-# --- Position tracking (entry price + stop loss) ---
+# ── Position tracking ─────────────────────────────────────────────────────────
 
 def _position_path(symbol: str) -> str:
     return f"position_{symbol.replace('/', '_')}.json"
@@ -108,6 +107,7 @@ def _save_position(symbol: str, entry_price: float) -> None:
         "symbol": symbol,
         "entry_price": entry_price,
         "stop_loss_price": round(entry_price * (1 - STOP_LOSS_PCT), 4),
+        "take_profit_price": round(entry_price * (1 + TAKE_PROFIT_PCT), 4),
         "opened_at": datetime.now(timezone.utc).isoformat(),
     }
     with open(_position_path(symbol), "w") as f:
@@ -120,49 +120,101 @@ def _clear_position(symbol: str) -> None:
         os.remove(path)
 
 
-# --- Signal logic ---
+# ── Signal ─────────────────────────────────────────────────────────────────────
 
 def get_signal(symbol: str) -> dict:
     """
-    Compute RSI + EMA signal for `symbol`.
-    BUY  : RSI < RSI_OVERSOLD  AND  EMA_SHORT > EMA_LONG
-    SELL : RSI > RSI_OVERBOUGHT OR  stop loss triggered
-    HOLD : everything else
+    Multi-factor AI signal.
+    Hard rules (SL/TP) always take priority over AI.
+    Falls back to rule-based if ANTHROPIC_API_KEY not set.
     """
     indicators = compute_indicators(symbol)
-    rsi = indicators["rsi"]
-    ema_short = indicators["ema_short"]
-    ema_long = indicators["ema_long"]
     current_price = indicators["close"]
-
-    # Stop loss takes priority
     position = _load_position(symbol)
+
+    # Hard rule: Stop Loss
     if position and current_price <= position["stop_loss_price"]:
         return {
             **indicators,
             "signal": "SELL",
-            "reason": f"Stop loss déclenché (prix {current_price} <= seuil {position['stop_loss_price']})",
+            "reason": f"Stop Loss déclenché — prix {current_price:.2f} ≤ seuil {position['stop_loss_price']:.2f}",
+            "confidence": 100,
+            "ai_powered": False,
             "stop_loss_triggered": True,
+            "take_profit_triggered": False,
             "entry_price": position["entry_price"],
             "stop_loss_price": position["stop_loss_price"],
+            "take_profit_price": position.get("take_profit_price"),
         }
 
-    if rsi < RSI_OVERSOLD and ema_short > ema_long:
-        signal, reason = "BUY", f"RSI survendu ({rsi}) + EMA{EMA_SHORT} au-dessus de EMA{EMA_LONG}"
-    elif rsi > RSI_OVERBOUGHT:
-        signal, reason = "SELL", f"RSI suracheté ({rsi})"
-    else:
-        trend = "haussière" if ema_short > ema_long else "baissière"
-        signal, reason = "HOLD", f"RSI neutre ({rsi}), tendance {trend}"
+    # Hard rule: Take Profit
+    if position and current_price >= position.get("take_profit_price", float("inf")):
+        return {
+            **indicators,
+            "signal": "SELL",
+            "reason": f"Take Profit atteint — prix {current_price:.2f} ≥ cible {position['take_profit_price']:.2f}",
+            "confidence": 100,
+            "ai_powered": False,
+            "stop_loss_triggered": False,
+            "take_profit_triggered": True,
+            "entry_price": position["entry_price"],
+            "stop_loss_price": position["stop_loss_price"],
+            "take_profit_price": position["take_profit_price"],
+        }
 
-    result = {**indicators, "signal": signal, "reason": reason, "stop_loss_triggered": False}
+    # AI analysis
+    ai_result = None
+    try:
+        from ai_analysis import get_ai_signal
+        ai_result = get_ai_signal(symbol, indicators)
+    except Exception:
+        pass
+
+    if ai_result:
+        signal = ai_result["signal"]
+        reason = ai_result["reasoning"]
+        confidence = ai_result.get("confidence", 0)
+        ai_powered = True
+    else:
+        # Rule-based fallback
+        rsi = indicators["rsi"]
+        ema_short = indicators["ema_short"]
+        ema_long = indicators["ema_long"]
+        if rsi < RSI_OVERSOLD and ema_short > ema_long:
+            signal = "BUY"
+            reason = f"RSI survendu ({rsi:.1f}) + EMA{EMA_SHORT} au-dessus EMA{EMA_LONG}"
+        elif rsi > RSI_OVERBOUGHT:
+            signal = "SELL"
+            reason = f"RSI suracheté ({rsi:.1f})"
+        else:
+            trend = "haussière" if ema_short > ema_long else "baissière"
+            signal = "HOLD"
+            reason = f"RSI neutre ({rsi:.1f}), tendance {trend}"
+        confidence = None
+        ai_powered = False
+
+    result = {
+        **indicators,
+        "signal": signal,
+        "reason": reason,
+        "confidence": confidence,
+        "ai_powered": ai_powered,
+        "stop_loss_triggered": False,
+        "take_profit_triggered": False,
+    }
     if position:
         result["entry_price"] = position["entry_price"]
         result["stop_loss_price"] = position["stop_loss_price"]
+        result["take_profit_price"] = position.get("take_profit_price")
     return result
 
 
-# --- Order execution ---
+# ── Order execution ───────────────────────────────────────────────────────────
+
+def get_balance(currency: str = "USDT") -> float:
+    balance = get_exchange().fetch_balance()
+    return balance["free"].get(currency, 0.0)
+
 
 def place_market_buy(symbol: str, amount_usdt: float) -> dict:
     exchange = get_exchange()
@@ -176,6 +228,7 @@ def place_market_buy(symbol: str, amount_usdt: float) -> dict:
         "qty": qty,
         "estimated_price": price,
         "stop_loss_price": round(price * (1 - STOP_LOSS_PCT), 4),
+        "take_profit_price": round(price * (1 + TAKE_PROFIT_PCT), 4),
         "order_id": order.get("id"),
         "status": order.get("status"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -188,13 +241,7 @@ def place_market_sell_all(symbol: str) -> dict:
     base_currency = symbol.split("/")[0]
     balance = get_balance(base_currency)
     if balance <= 0:
-        return {
-            "action": "SELL",
-            "symbol": symbol,
-            "qty": 0,
-            "status": "skipped — no balance",
-            "testnet": TESTNET,
-        }
+        return {"action": "SELL", "symbol": symbol, "qty": 0, "status": "skipped — no balance", "testnet": TESTNET}
     qty = exchange.amount_to_precision(symbol, balance)
     order = exchange.create_market_sell_order(symbol, float(qty))
     _clear_position(symbol)
@@ -207,20 +254,3 @@ def place_market_sell_all(symbol: str) -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "testnet": TESTNET,
     }
-
-
-def run_strategy(symbol: str, amount_usdt: float) -> dict:
-    signal_data = get_signal(symbol)
-    signal = signal_data["signal"]
-    result = {**signal_data, "symbol": symbol, "testnet": TESTNET}
-
-    if signal == "BUY":
-        order = place_market_buy(symbol, amount_usdt)
-        result.update(order)
-    elif signal == "SELL":
-        order = place_market_sell_all(symbol)
-        result.update(order)
-    else:
-        result["action"] = "HOLD"
-
-    return result

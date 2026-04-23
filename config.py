@@ -1,8 +1,11 @@
 import os
 
-# Binance Testnet credentials (set via environment variables)
+# Binance Testnet credentials
 BINANCE_API_KEY = os.getenv("BINANCE_TESTNET_API_KEY", "")
 BINANCE_SECRET = os.getenv("BINANCE_TESTNET_SECRET", "")
+
+# Anthropic Claude API key
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Exchange settings
 EXCHANGE_ID = "binance"
@@ -19,14 +22,18 @@ SUPPORTED_SYMBOLS = {
     "Solana (SOL)": "SOL/USDT",
 }
 
-# RSI + EMA strategy parameters
+# Indicators
 RSI_PERIOD = 14
-RSI_OVERSOLD = 30       # BUY threshold
-RSI_OVERBOUGHT = 70     # SELL threshold
+RSI_OVERSOLD = 30
+RSI_OVERBOUGHT = 70
 EMA_SHORT = 20
 EMA_LONG = 50
 OHLCV_TIMEFRAME = "1h"
 OHLCV_LIMIT = 100
 
 # Risk management
-STOP_LOSS_PCT = 0.02    # 2% stop loss below entry price
+STOP_LOSS_PCT = 0.02    # 2% stop loss
+TAKE_PROFIT_PCT = 0.03  # 3% take profit
+
+# Auto-refresh interval (seconds)
+AUTO_REFRESH_SECONDS = 300  # 5 minutes
