@@ -5,7 +5,7 @@ from config import (
     RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_SHORT, EMA_LONG,
     STOP_LOSS_PCT, TAKE_PROFIT_PCT,
-    AUTO_REFRESH_SECONDS,
+    AUTO_REFRESH_SECONDS, OHLCV_TIMEFRAME,
 )
 from trading_logic import get_signal, get_current_price, get_balance, place_market_buy, place_market_sell_all
 
