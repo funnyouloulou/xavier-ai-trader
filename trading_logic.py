@@ -2,6 +2,7 @@ import json
 import os
 import ccxt
 import pandas as pd
+import yfinance as yf
 from datetime import datetime, timezone
 from config import (
     BINANCE_API_KEY, BINANCE_SECRET,
@@ -31,14 +32,17 @@ def get_exchange() -> ccxt.binance:
     return ccxt.binance(config)
 
 
-def _public_exchange() -> ccxt.binance:
-    """Public Binance exchange for market data (no auth, no testnet)."""
-    return ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
+def _ccxt_to_yf(symbol: str) -> str:
+    # Yahoo Finance uses BTC-USD not BTC-USDT
+    base, quote = symbol.split("/")
+    if quote == "USDT":
+        quote = "USD"
+    return f"{base}-{quote}"
 
 
 def get_current_price(symbol: str) -> float:
-    ticker = _public_exchange().fetch_ticker(symbol)
-    return ticker["last"]
+    hist = yf.Ticker(_ccxt_to_yf(symbol)).history(period="1d", interval="1m")
+    return float(hist["Close"].iloc[-1])
 
 
 def get_balance(currency: str = "USDT") -> float:
@@ -48,10 +52,17 @@ def get_balance(currency: str = "USDT") -> float:
 
 
 def _load_ohlcv(symbol: str) -> pd.DataFrame:
-    ohlcv = _public_exchange().fetch_ohlcv(symbol, timeframe=OHLCV_TIMEFRAME, limit=OHLCV_LIMIT)
-    df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    return df
+    hist = yf.Ticker(_ccxt_to_yf(symbol)).history(period="7d", interval=OHLCV_TIMEFRAME)
+    hist = hist.reset_index()
+    df = pd.DataFrame({
+        "timestamp": pd.to_datetime(hist["Datetime"], utc=True),
+        "open": hist["Open"],
+        "high": hist["High"],
+        "low": hist["Low"],
+        "close": hist["Close"],
+        "volume": hist["Volume"],
+    })
+    return df.tail(OHLCV_LIMIT).reset_index(drop=True)
 
 
 def _compute_rsi(series: pd.Series, period: int) -> pd.Series:
