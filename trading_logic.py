@@ -14,21 +14,30 @@ from config import (
 
 
 def get_exchange() -> ccxt.binance:
-    exchange = ccxt.binance({
+    """Testnet exchange for private endpoints (orders, balance)."""
+    config: dict = {
         "apiKey": BINANCE_API_KEY,
         "secret": BINANCE_SECRET,
         "enableRateLimit": True,
         "options": {"defaultType": "spot"},
-    })
+    }
     if TESTNET:
-        exchange.set_sandbox_mode(True)
-        exchange.urls["api"] = TESTNET_URLS["api"]
-    return exchange
+        config["urls"] = {
+            "api": {
+                "public": TESTNET_URLS["private"],
+                "private": TESTNET_URLS["private"],
+            }
+        }
+    return ccxt.binance(config)
+
+
+def _public_exchange() -> ccxt.binance:
+    """Public Binance exchange for market data (no auth, no testnet)."""
+    return ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
 
 
 def get_current_price(symbol: str) -> float:
-    exchange = get_exchange()
-    ticker = exchange.fetch_ticker(symbol)
+    ticker = _public_exchange().fetch_ticker(symbol)
     return ticker["last"]
 
 
@@ -39,8 +48,7 @@ def get_balance(currency: str = "USDT") -> float:
 
 
 def _load_ohlcv(symbol: str) -> pd.DataFrame:
-    exchange = get_exchange()
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=OHLCV_TIMEFRAME, limit=OHLCV_LIMIT)
+    ohlcv = _public_exchange().fetch_ohlcv(symbol, timeframe=OHLCV_TIMEFRAME, limit=OHLCV_LIMIT)
     df = pd.DataFrame(ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"])
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     return df

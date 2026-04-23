@@ -8,9 +8,7 @@ BINANCE_SECRET = os.getenv("BINANCE_TESTNET_SECRET", "")
 EXCHANGE_ID = "binance"
 TESTNET = True
 TESTNET_URLS = {
-    "api": "https://testnet.binance.vision/api",
-    "fapiPublic": "https://testnet.binancefuture.com/fapi/v1",
-    "fapiPrivate": "https://testnet.binancefuture.com/fapi/v1",
+    "private": "https://testnet.binance.vision/api",
 }
 
 # Trading pairs
