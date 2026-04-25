@@ -160,32 +160,57 @@ WATCHLIST: dict[str, dict[str, str]] = {
 TOTAL_ASSETS = sum(len(v) for v in WATCHLIST.values())
 
 
+def _rsi_ema_signal(closes) -> tuple[float, float, float, bool]:
+    """Returns (rsi, ema20, ema50, ema_bullish)."""
+    delta = closes.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rsi = float((100 - 100 / (1 + gain / loss)).iloc[-1])
+    ema20 = float(closes.ewm(span=20, adjust=False).mean().iloc[-1])
+    ema50 = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
+    return rsi, ema20, ema50, ema20 > ema50
+
+
+def _tf_agrees(ticker: str, interval: str, signal: str) -> bool:
+    """Check if a given timeframe agrees with the primary signal."""
+    try:
+        hist = yf.Ticker(ticker).history(period="5d", interval=interval)
+        if hist.empty or len(hist) < 20:
+            return False
+        rsi, ema20, ema50, bullish = _rsi_ema_signal(hist["Close"])
+        if signal == "BUY":
+            return rsi < 35 and bullish
+        return rsi > 65 and not bullish
+    except Exception:
+        return False
+
+
 def _analyse(name: str, ticker: str, category: str) -> dict | None:
     try:
         hist = yf.Ticker(ticker).history(period="7d", interval="1h")
         if hist.empty or len(hist) < 50:
             return None
 
-        closes = hist["Close"]
-
-        delta = closes.diff()
-        gain = delta.clip(lower=0).rolling(14).mean()
-        loss = (-delta.clip(upper=0)).rolling(14).mean()
-        rsi = float((100 - 100 / (1 + gain / loss)).iloc[-1])
-
-        ema20 = float(closes.ewm(span=20, adjust=False).mean().iloc[-1])
-        ema50 = float(closes.ewm(span=50, adjust=False).mean().iloc[-1])
-        close = float(closes.iloc[-1])
-        ema_bullish = ema20 > ema50
+        rsi, ema20, ema50, ema_bullish = _rsi_ema_signal(hist["Close"])
+        close = float(hist["Close"].iloc[-1])
 
         if rsi < 30 and ema_bullish:
             signal = "BUY"
-            confidence = min(95, int(70 + (30 - rsi) * 2))
+            base_conf = min(95, int(70 + (30 - rsi) * 2))
         elif rsi > 70 and not ema_bullish:
             signal = "SELL"
-            confidence = min(95, int(70 + (rsi - 70) * 2))
+            base_conf = min(95, int(70 + (rsi - 70) * 2))
         else:
             return None
+
+        # Multi-timeframe confirmation
+        tf15 = _tf_agrees(ticker, "15m", signal)
+        tf4h = _tf_agrees(ticker, "4h", signal)
+        tf_count = 1 + int(tf15) + int(tf4h)
+        tf_label = f"{tf_count}/3 TF ({'15m ✓' if tf15 else '15m ✗'} · {'4h ✓' if tf4h else '4h ✗'})"
+
+        # Boost confidence based on timeframe agreement
+        confidence = min(98, base_conf + (tf_count - 1) * 5)
 
         return {
             "name": name,
@@ -198,6 +223,8 @@ def _analyse(name: str, ticker: str, category: str) -> dict | None:
             "ema50": round(ema50, 2),
             "close": round(close, 2),
             "ema_trend": "↑" if ema_bullish else "↓",
+            "tf_label": tf_label,
+            "tf_count": tf_count,
         }
     except Exception:
         return None
