@@ -1,5 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import pandas as pd
 import yfinance as yf
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 WATCHLIST: dict[str, dict[str, str]] = {
     "🇺🇸 Tech US": {
@@ -274,3 +277,82 @@ def get_ticker_signal(ticker: str, name: str) -> dict:
         "confidence": confidence,
         "ai_powered": ai_powered,
     }
+
+
+def build_chart(ticker: str, name: str, signal: str) -> go.Figure:
+    """Price + EMA20/50 + RSI chart for the last 30 days."""
+    hist = yf.Ticker(ticker).history(period="30d", interval="1h")
+    if hist.empty:
+        return None
+
+    closes = hist["Close"]
+    dates = hist.index
+
+    delta = closes.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = (-delta.clip(upper=0)).rolling(14).mean()
+    rsi_series = 100 - 100 / (1 + gain / loss)
+    ema20_series = closes.ewm(span=20, adjust=False).mean()
+    ema50_series = closes.ewm(span=50, adjust=False).mean()
+
+    signal_color = {"BUY": "#00c853", "SELL": "#e53935", "HOLD": "#546e7a"}[signal]
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        row_heights=[0.68, 0.32],
+        vertical_spacing=0.06,
+    )
+
+    # Price line
+    fig.add_trace(go.Scatter(
+        x=dates, y=closes,
+        name="Prix", line=dict(color="#ffffff", width=1.5),
+    ), row=1, col=1)
+
+    # EMA 20
+    fig.add_trace(go.Scatter(
+        x=dates, y=ema20_series,
+        name="EMA 20", line=dict(color="#00c853", width=1, dash="dot"),
+    ), row=1, col=1)
+
+    # EMA 50
+    fig.add_trace(go.Scatter(
+        x=dates, y=ema50_series,
+        name="EMA 50", line=dict(color="#e53935", width=1, dash="dot"),
+    ), row=1, col=1)
+
+    # Signal marker on last candle
+    fig.add_trace(go.Scatter(
+        x=[dates[-1]], y=[float(closes.iloc[-1])],
+        mode="markers",
+        marker=dict(color=signal_color, size=10, symbol="circle"),
+        name=signal, showlegend=True,
+    ), row=1, col=1)
+
+    # RSI
+    fig.add_trace(go.Scatter(
+        x=dates, y=rsi_series,
+        name="RSI", line=dict(color="#7c4dff", width=1.5),
+        fill="tozeroy", fillcolor="rgba(124,77,255,0.08)",
+    ), row=2, col=1)
+
+    fig.add_hline(y=70, line=dict(color="#e53935", dash="dash", width=1), row=2, col=1)
+    fig.add_hline(y=30, line=dict(color="#00c853", dash="dash", width=1), row=2, col=1)
+    fig.add_hrect(y0=30, y1=70, fillcolor="rgba(255,255,255,0.03)", line_width=0, row=2, col=1)
+
+    fig.update_layout(
+        template="plotly_dark",
+        title=dict(text=f"{name} — 30 jours", font=dict(size=14)),
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#0e1117",
+        legend=dict(orientation="h", y=1.08, x=0),
+        margin=dict(l=8, r=8, t=50, b=8),
+        height=420,
+        xaxis2=dict(showgrid=False),
+        yaxis=dict(showgrid=True, gridcolor="#1e1e2e"),
+        yaxis2=dict(range=[0, 100], showgrid=True, gridcolor="#1e1e2e", title="RSI"),
+    )
+    fig.update_xaxes(showspikes=True, spikecolor="#444", spikethickness=1)
+
+    return fig

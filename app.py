@@ -4,10 +4,10 @@ from config import (
     SUPPORTED_SYMBOLS, TESTNET,
     EMA_SHORT, EMA_LONG,
     STOP_LOSS_PCT, TAKE_PROFIT_PCT,
-    AUTO_REFRESH_SECONDS, OHLCV_TIMEFRAME,
+    AUTO_REFRESH_SECONDS,
 )
 from trading_logic import get_current_price, get_balance, place_market_buy, place_market_sell_all
-from scanner import scan_markets, get_ticker_signal, WATCHLIST, TOTAL_ASSETS
+from scanner import scan_markets, get_ticker_signal, build_chart, WATCHLIST, TOTAL_ASSETS
 
 st.set_page_config(
     page_title="Xavier AI Trader",
@@ -151,6 +151,12 @@ with tab2:
             st.success("➡️ Va acheter cet actif sur eToro maintenant.")
         elif signal == "SELL":
             st.error("➡️ Va vendre cet actif sur eToro maintenant.")
+
+        # Chart
+        with st.spinner("Chargement du graphique…"):
+            fig = build_chart(ticker, asset_name, signal)
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # ── TAB 3 : EXÉCUTER (crypto testnet) ────────────────────────────────────────
