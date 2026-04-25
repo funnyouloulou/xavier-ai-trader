@@ -334,3 +334,12 @@ with tab5:
 """)
         tg_status = "✅ Actif" if tg_active else "❌ Non configuré"
         st.info(f"Statut Telegram : {tg_status}")
+
+        if tg_active:
+            if st.button("🔔 Envoyer un message de test", use_container_width=True):
+                from notifications import send_telegram
+                ok = send_telegram("🔔 <b>Test Xavier AI Trader</b>\n\nLes notifications sont bien configurées ! Tu recevras tes alertes ici. ✅")
+                if ok:
+                    st.success("Message envoyé ! Vérifie ton Telegram.")
+                else:
+                    st.error("Échec. Vérifie le token et l'ID dans les Secrets.")
