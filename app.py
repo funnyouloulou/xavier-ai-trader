@@ -337,9 +337,17 @@ with tab5:
 
         if tg_active:
             if st.button("🔔 Envoyer un message de test", use_container_width=True):
-                from notifications import send_telegram
-                ok = send_telegram("🔔 <b>Test Xavier AI Trader</b>\n\nLes notifications sont bien configurées ! Tu recevras tes alertes ici. ✅")
-                if ok:
-                    st.success("Message envoyé ! Vérifie ton Telegram.")
-                else:
-                    st.error("Échec. Vérifie le token et l'ID dans les Secrets.")
+                import requests as _req
+                from config import TELEGRAM_BOT_TOKEN as _tok, TELEGRAM_CHAT_ID as _cid
+                try:
+                    resp = _req.post(
+                        f"https://api.telegram.org/bot{_tok}/sendMessage",
+                        json={"chat_id": _cid, "text": "🔔 Test Xavier AI Trader — notifications OK ✅", "parse_mode": "HTML"},
+                        timeout=8,
+                    )
+                    if resp.status_code == 200:
+                        st.success("Message envoyé ! Vérifie ton Telegram.")
+                    else:
+                        st.error(f"Erreur {resp.status_code} : {resp.json().get('description', resp.text)}")
+                except Exception as e:
+                    st.error(f"Erreur réseau : {e}")
