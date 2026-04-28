@@ -4,3 +4,4 @@ streamlit
 anthropic
 yfinance
 plotly
+requests
